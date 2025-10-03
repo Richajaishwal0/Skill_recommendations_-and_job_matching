@@ -7,8 +7,7 @@ import json
 from datetime import datetime
 from job_matcher import JobMatcher
 from resume_processor import ResumeProcessor
-from course_recommender import CourseRecommender
-from database import DatabaseManager
+
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -22,18 +21,13 @@ job_matcher = JobMatcher()
 print("JobMatcher initialized")
 resume_processor = ResumeProcessor()
 print("ResumeProcessor initialized")
-course_recommender = CourseRecommender()
-print("CourseRecommender initialized")
-db_manager = DatabaseManager()
-print("DatabaseManager initialized")
+
 print("All components ready!")
 
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+
 
 @app.route('/upload_resume', methods=['POST'])
 def upload_resume():
@@ -98,14 +92,12 @@ def match_jobs():
         # Get job matches
         job_matches = job_matcher.find_matches(skills, job_preference)
         
-        # Store session data
-        session_id = db_manager.store_session(skills, job_matches)
-        session['session_id'] = session_id
+
         
         return jsonify({
             'success': True,
             'job_matches': job_matches,
-            'session_id': session_id
+
         })
     
     except Exception as e:
@@ -124,13 +116,9 @@ def get_skill_gap():
         # Get skill gap analysis
         skill_gap = job_matcher.analyze_skill_gap(job_id, user_skills)
         
-        # Get course recommendations
-        courses = course_recommender.recommend_courses(skill_gap['missing_skills'])
-        
         return jsonify({
             'success': True,
-            'skill_gap': skill_gap,
-            'recommended_courses': courses
+            'skill_gap': skill_gap
         })
     
     except Exception as e:
