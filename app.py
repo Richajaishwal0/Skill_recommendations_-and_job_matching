@@ -1,19 +1,14 @@
-from flask import Flask, render_template, request, jsonify, session
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
-import sqlite3
-import json
-from datetime import datetime
 from job_matcher import JobMatcher
 from resume_processor import ResumeProcessor
 
-
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
-app.secret_key = 'your-secret-key-here'
+CORS(app)
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 # Initialize components
 print("Initializing components...")
@@ -58,9 +53,7 @@ def upload_resume():
             extracted_skills = resume_processor.extract_skills(resume_text)
             print(f"Extracted skills: {extracted_skills}")
             
-            # Store in session
-            session['resume_text'] = resume_text
-            session['extracted_skills'] = extracted_skills
+
             
             # Clean up file
             os.remove(filepath)
