@@ -222,112 +222,7 @@ function App() {
     ]
   };
 
-  // Enhanced skill extraction with better pattern matching
-  const extractSkillsFromText = (text: string): Skill[] => {
-    const extractedSkills: Skill[] = [];
-    const textLower = text.toLowerCase();
-    const skillConfidence: { [key: string]: number } = {};
 
-    // Flatten all skills for searching
-    const allSkills = Object.values(comprehensiveSkillDatabase).flat();
-    
-    // Direct skill matching with context scoring
-    allSkills.forEach(skill => {
-      const skillLower = skill.toLowerCase();
-      const regex = new RegExp(`\\b${skillLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-      const matches = text.match(regex);
-      
-      if (matches) {
-        let confidence = 0.7; // Base confidence
-        
-        // Boost confidence based on context
-        const contextPatterns = [
-          `experienced in ${skillLower}`,
-          `skilled in ${skillLower}`,
-          `proficient in ${skillLower}`,
-          `expert in ${skillLower}`,
-          `${skillLower} developer`,
-          `${skillLower} engineer`,
-          `${skillLower} specialist`,
-          `years of ${skillLower}`,
-          `${skillLower} certification`,
-          `${skillLower} project`
-        ];
-        
-        contextPatterns.forEach(pattern => {
-          if (textLower.includes(pattern)) {
-            confidence += 0.1;
-          }
-        });
-        
-        // Find category
-        let category = 'general';
-        Object.entries(comprehensiveSkillDatabase).forEach(([cat, skills]) => {
-          if (skills.includes(skill)) {
-            category = cat.replace('_', ' ');
-          }
-        });
-        
-        skillConfidence[skill] = Math.min(confidence, 1.0);
-        extractedSkills.push({
-          name: skill,
-          category,
-          confidence: skillConfidence[skill]
-        });
-      }
-    });
-
-    // Extract skills from common resume patterns
-    const patterns = [
-      /(?:skills?|technologies?|tools?|languages?)[:\s]*([^.]+)/gi,
-      /(?:experienced in|skilled in|proficient in|knowledge of|familiar with)[:\s]*([^.]+)/gi,
-      /(?:programming languages?|technical skills?|core competencies?)[:\s]*([^.]+)/gi,
-      /•\s*([^•\n]+)/g,
-      /-\s*([^-\n]+)/g,
-    ];
-
-    patterns.forEach(pattern => {
-      const matches = text.match(pattern);
-      if (matches) {
-        matches.forEach(match => {
-          const items = match.split(/[,;|&]/).map(item => item.trim());
-          items.forEach(item => {
-            const cleanItem = item.replace(/^[•\-\s]*/, '').replace(/[:\s]*$/, '').trim();
-            if (cleanItem.length > 2 && cleanItem.length < 50) {
-              // Check if it's a known skill
-              const foundSkill = allSkills.find(skill => 
-                skill.toLowerCase() === cleanItem.toLowerCase() ||
-                cleanItem.toLowerCase().includes(skill.toLowerCase()) ||
-                skill.toLowerCase().includes(cleanItem.toLowerCase())
-              );
-              
-              if (foundSkill && !extractedSkills.some(s => s.name === foundSkill)) {
-                let category = 'general';
-                Object.entries(comprehensiveSkillDatabase).forEach(([cat, skills]) => {
-                  if (skills.includes(foundSkill)) {
-                    category = cat.replace('_', ' ');
-                  }
-                });
-                
-                extractedSkills.push({
-                  name: foundSkill,
-                  category,
-                  confidence: 0.6
-                });
-              }
-            }
-          });
-        });
-      }
-    });
-
-    // Remove duplicates and sort by confidence
-    const uniqueSkills = extractedSkills.filter((skill, index, self) => 
-      index === self.findIndex(s => s.name === skill.name)
-    );
-
-    return uniqueSkills.sort((a, b) => b.confidence - a.confidence);
-  };
 
   // Enhanced skill suggestions with categories
   const getSkillSuggestions = (query: string) => {
@@ -374,100 +269,117 @@ function App() {
     return totalScore * 100;
   };
 
-  const findJobMatches = useCallback(() => {
+  const findJobMatches = useCallback(async () => {
     if (userSkills.length === 0) return;
 
     setIsLoading(true);
     
-    setTimeout(() => {
-      const matches: JobMatch[] = [];
-      
-      Object.entries(jobDatabase).forEach(([jobId, jobData]) => {
-        const similarity = calculateSimilarity(userSkills, [...jobData.skills, ...jobData.technology_skills]);
-        const score = calculateMatchingScore(userSkills, jobData);
-        
-        if (similarity >= 0.2 || score >= 15) {
-          const userSkillsLower = userSkills.map(s => s.toLowerCase());
-          const allJobSkills = [...jobData.skills, ...jobData.technology_skills];
-          
-          const matchedSkills = allJobSkills.filter(skill =>
-            userSkillsLower.some(userSkill =>
-              userSkill.includes(skill.toLowerCase()) || skill.toLowerCase().includes(userSkill)
-            )
-          );
-
-          const missingSkills = {
-            skills: jobData.skills.filter(skill => !matchedSkills.includes(skill)),
-            abilities: jobData.abilities.filter(ability => 
-              !userSkillsLower.some(userSkill => userSkill.includes(ability.toLowerCase()))
-            ),
-            knowledge: jobData.knowledge.filter(knowledge => 
-              !userSkillsLower.some(userSkill => userSkill.includes(knowledge.toLowerCase()))
-            ),
-            technology_skills: jobData.technology_skills.filter(tech => !matchedSkills.includes(tech))
-          };
-
-          matches.push({
-            id: jobId,
-            title: jobData.title,
-            description: jobData.description,
-            similarity: similarity * 100,
-            score,
-            matchedSkills,
-            missingSkills,
-            qualifies: score >= 34.62,
-            salaryRange: jobData.salaryRange,
-            growthRate: jobData.growthRate
-          });
-        }
+    try {
+      const response = await fetch('http://localhost:5001/match_jobs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          skills: userSkills,
+          job_preference: jobPreference
+        }),
       });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const text = await response.text();
+      if (!text) {
+        throw new Error('Empty response from server');
+      }
+      
+      const result = JSON.parse(text);
+      
+      if (result.success && result.job_matches) {
 
-      matches.sort((a, b) => (b.score + b.similarity) - (a.score + a.similarity));
-      setJobMatches(matches.slice(0, 5));
-      setShowResults(true);
+        
+        // Transform backend response to frontend format
+        const transformedMatches = result.job_matches.map((match: any) => ({
+          id: match.job_id || 'unknown',
+          title: match.title,
+          description: match.description,
+          similarity: match.similarity * 100,
+          score: match.score,
+          matchedSkills: match.skills_match?.matched_skills || [],
+          missingSkills: match.missing_skills || {
+            skills: [],
+            abilities: [],
+            knowledge: [],
+            technology_skills: []
+          },
+          qualifies: match.score >= 34.62,
+          salaryRange: "$70,000 - $150,000",
+          growthRate: "Growth rate varies"
+        }));
+        
+
+        setJobMatches(transformedMatches);
+        setShowResults(true);
+      } else {
+
+        setJobMatches([]);
+        setShowResults(true);
+      }
+    } catch (error) {
+      console.error('Error finding job matches:', error);
+    } finally {
       setIsLoading(false);
-    }, 2000);
-  }, [userSkills]);
+    }
+  }, [userSkills, jobPreference]);
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       setUploadedFile(file);
       setIsLoading(true);
       
-      setTimeout(() => {
-        // Simulate advanced resume processing
-        const mockResumeText = `
-          John Doe - Senior Software Developer
-          
-          TECHNICAL SKILLS:
-          • Programming Languages: Python, JavaScript, TypeScript, Java, C++, Go
-          • Web Technologies: React, Angular, Vue.js, Node.js, Express.js, Django, Flask
-          • Databases: PostgreSQL, MongoDB, Redis, MySQL, Elasticsearch
-          • Cloud Platforms: AWS, Azure, Docker, Kubernetes, Terraform
-          • DevOps: Jenkins, GitLab CI, GitHub Actions, Docker, Kubernetes
-          • Machine Learning: TensorFlow, PyTorch, Scikit-learn, Pandas, NumPy
-          • Tools: Git, JIRA, Confluence, Postman, Figma
-          
-          EXPERIENCE:
-          Senior Software Developer at Tech Corp (2020-Present)
-          • Developed scalable web applications using React and Node.js
-          • Implemented machine learning models using Python and TensorFlow
-          • Led a team of 5 developers using Agile methodologies
-          • Deployed applications on AWS using Docker and Kubernetes
-          
-          CERTIFICATIONS:
-          • AWS Certified Solutions Architect
-          • Google Cloud Professional Developer
-          • Certified Scrum Master
-        `;
+      try {
+        const formData = new FormData();
+        formData.append('resume', file);
         
-        const skills = extractSkillsFromText(mockResumeText);
-        setExtractedSkills(skills);
-        setUserSkills(skills.map(s => s.name));
-        setExtractedText(`Successfully processed ${file.name}. Extracted ${skills.length} skills with advanced pattern matching.`);
+        const response = await fetch('http://localhost:5001/upload_resume', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const text = await response.text();
+        if (!text) {
+          throw new Error('Empty response from server');
+        }
+        
+        const result = JSON.parse(text);
+        
+        if (result.success) {
+          // Convert extracted skills to the expected format
+          const skills = result.extracted_skills.map((skill: string) => ({
+            name: skill,
+            category: 'extracted',
+            confidence: 0.8
+          }));
+          
+          setExtractedSkills(skills);
+          setUserSkills(result.extracted_skills);
+          setExtractedText(`Successfully processed ${file.name}. Extracted ${result.extracted_skills.length} skills from your resume.`);
+        } else {
+          setExtractedText(`Error: ${result.error}`);
+        }
+      } catch (error) {
+        console.error('Upload error:', error);
+        setExtractedText(`Error processing file: ${error}`);
+      } finally {
         setIsLoading(false);
-      }, 2500);
+      }
     }
   };
 
@@ -490,7 +402,11 @@ function App() {
       const file = files[0];
       if (file.type === 'application/pdf' || file.name.endsWith('.docx')) {
         setUploadedFile(file);
-        handleFileUpload({ target: { files: [file] } } as any);
+        // Create a synthetic event for handleFileUpload
+        const syntheticEvent = {
+          target: { files: [file] }
+        } as React.ChangeEvent<HTMLInputElement>;
+        handleFileUpload(syntheticEvent);
       }
     }
   };
@@ -557,38 +473,27 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
-      {/* Animated Background Elements */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-gradient-to-br from-blue-400/20 to-purple-600/20 rounded-full blur-3xl animate-pulse"></div>
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-gradient-to-br from-teal-400/20 to-blue-600/20 rounded-full blur-3xl animate-pulse delay-1000"></div>
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-gradient-to-br from-indigo-400/10 to-purple-600/10 rounded-full blur-3xl animate-pulse delay-500"></div>
-      </div>
-
-      {/* Enhanced Header */}
-      <header className="relative bg-white/80 backdrop-blur-lg shadow-lg border-b border-gray-200/50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+      {/* Modern Header */}
+      <header className="bg-white/80 backdrop-blur-md border-b border-gray-200/50 sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-6">
           <div className="flex justify-between items-center h-20">
-            <div className="flex items-center">
+            <div className="flex items-center space-x-4">
               <div className="relative">
-                <Brain className="w-10 h-10 text-blue-600 mr-4" />
-                <Sparkles className="w-4 h-4 text-yellow-500 absolute -top-1 -right-1 animate-pulse" />
+                <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl flex items-center justify-center shadow-lg">
+                  <Brain className="w-6 h-6 text-white" />
+                </div>
+                <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white"></div>
               </div>
               <div>
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                  AI Job Matcher Pro
-                </h1>
-                <p className="text-sm text-gray-500 mt-1">Advanced Career Intelligence Platform</p>
+                <h1 className="text-2xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent">CareerSync</h1>
+                <p className="text-sm text-gray-600 font-medium">AI-Powered Career Intelligence</p>
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <div className="hidden md:flex items-center space-x-2 text-sm text-gray-600 bg-gray-100 px-4 py-2 rounded-full">
-                <Zap className="w-4 h-4 text-yellow-500" />
-                <span>Powered by Transformers & O*NET</span>
-              </div>
-              <div className="flex items-center space-x-1 text-sm text-green-600 bg-green-50 px-3 py-1 rounded-full">
-                <Award className="w-4 h-4" />
-                <span>Pro Version</span>
+              <div className="hidden md:flex items-center space-x-2 px-4 py-2 bg-blue-50 rounded-full">
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                <span className="text-sm font-medium text-blue-700">Live Matching</span>
               </div>
             </div>
           </div>
@@ -596,188 +501,179 @@ function App() {
       </header>
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        {/* Enhanced Hero Section */}
-        <div className="text-center mb-16">
-          <div className="inline-flex items-center space-x-2 bg-gradient-to-r from-blue-100 to-purple-100 px-6 py-3 rounded-full mb-6">
-            <Sparkles className="w-5 h-5 text-blue-600" />
-            <span className="text-blue-800 font-medium">Next-Generation Job Matching</span>
+        {/* Hero Section */}
+        <div className="text-center mb-16 pt-16">
+          <div className="inline-flex items-center px-4 py-2 bg-white/60 backdrop-blur-sm rounded-full border border-gray-200/50 mb-8">
+            <Sparkles className="w-4 h-4 text-blue-600 mr-2" />
+            <span className="text-sm font-semibold text-gray-700">Next-Gen Career Matching</span>
           </div>
-          <h2 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6 leading-tight">
-            Find Your
-            <span className="bg-gradient-to-r from-blue-600 via-purple-600 to-teal-600 bg-clip-text text-transparent"> Perfect </span>
-            Career Match
+          <h2 className="text-6xl font-bold mb-6">
+            <span className="bg-gradient-to-r from-gray-900 via-blue-900 to-indigo-900 bg-clip-text text-transparent">
+              Discover Your
+            </span>
+            <br />
+            <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+              Perfect Career
+            </span>
           </h2>
-          <p className="text-xl text-gray-600 max-w-4xl mx-auto leading-relaxed">
-            Upload your resume or enter your skills to get AI-powered job recommendations with 
-            <span className="font-semibold text-blue-600"> advanced semantic analysis</span>, 
-            personalized skill gap insights, and curated learning paths.
+          <p className="text-xl text-gray-600 max-w-3xl mx-auto leading-relaxed mb-8">
+            Advanced AI analyzes your skills and matches you with opportunities that align with your career goals and growth potential.
           </p>
-          
-          {/* Stats */}
-          <div className="flex justify-center space-x-8 mt-8">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-blue-600">500K+</div>
-              <div className="text-sm text-gray-500">Skills Analyzed</div>
+          <div className="flex justify-center space-x-8 text-sm text-gray-500">
+            <div className="flex items-center">
+              <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+              <span>500K+ Skills Analyzed</span>
             </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-purple-600">95%</div>
-              <div className="text-sm text-gray-500">Match Accuracy</div>
+            <div className="flex items-center">
+              <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+              <span>95% Match Accuracy</span>
             </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-teal-600">10K+</div>
-              <div className="text-sm text-gray-500">Courses Available</div>
+            <div className="flex items-center">
+              <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+              <span>Real-time Updates</span>
             </div>
           </div>
         </div>
 
-        {/* Enhanced Main Input Section */}
+        {/* Main Input Section */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 mb-16">
-          {/* Enhanced Resume Upload */}
+          {/* Resume Upload */}
           <div className="group">
-            <div className="bg-white/70 backdrop-blur-sm rounded-3xl shadow-xl p-8 hover:shadow-2xl transition-all duration-500 border border-gray-200/50 hover:border-blue-300/50 relative overflow-hidden">
-              {/* Gradient overlay */}
-              <div className="absolute inset-0 bg-gradient-to-br from-blue-50/50 to-purple-50/50 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-              
-              <div className="relative z-10">
-                <div className="flex items-center justify-between mb-8">
-                  <h3 className="text-2xl font-bold text-gray-900 flex items-center">
-                    <div className="p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl mr-4 shadow-lg">
-                      <Upload className="w-6 h-6 text-white" />
-                    </div>
+            <div className="bg-white/70 backdrop-blur-sm rounded-3xl border border-gray-200/50 p-8 shadow-xl hover:shadow-2xl transition-all duration-500 hover:-translate-y-1">
+              <div className="flex items-center mb-8">
+                <div className="w-14 h-14 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center mr-4 shadow-lg">
+                  <Upload className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold text-gray-900 mb-1">
                     Smart Resume Analysis
                   </h3>
-                  <div className="flex items-center space-x-1 text-xs text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
-                    <Brain className="w-3 h-3" />
-                    <span>AI Powered</span>
-                  </div>
+                  <p className="text-gray-600">
+                    AI-powered skill extraction in seconds
+                  </p>
                 </div>
+              </div>
                 
-                <div 
-                  className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all duration-300 cursor-pointer relative overflow-hidden ${
-                    isDragOver 
-                      ? 'border-blue-400 bg-blue-50/50 scale-105' 
-                      : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/30'
-                  }`}
-                  onClick={() => fileInputRef.current?.click()}
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                >
-                  {isLoading ? (
-                    <div className="space-y-4">
-                      <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto"></div>
-                      <p className="text-blue-600 font-medium">Analyzing your resume with AI...</p>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full animate-pulse" style={{width: '70%'}}></div>
+              <div 
+                className={`relative border-2 border-dashed rounded-2xl p-10 text-center transition-all duration-300 cursor-pointer group/upload ${
+                  isDragOver 
+                    ? 'border-emerald-400 bg-emerald-50/50 scale-[1.02]' 
+                    : 'border-gray-300 hover:border-emerald-400 hover:bg-emerald-50/30'
+                }`}
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                {isLoading ? (
+                  <div className="space-y-6">
+                    <div className="relative">
+                      <div className="w-20 h-20 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin mx-auto"></div>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <Brain className="w-8 h-8 text-emerald-600" />
                       </div>
                     </div>
-                  ) : (
-                    <>
-                      <div className="relative">
-                        <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4 group-hover:text-blue-500 transition-colors" />
-                        {uploadedFile && (
-                          <div className="absolute -top-2 -right-2 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
-                            <CheckCircle className="w-4 h-4 text-white" />
-                          </div>
-                        )}
-                      </div>
-                      <p className="text-lg font-medium text-gray-700 mb-2">
-                        {uploadedFile ? uploadedFile.name : 'Drop your resume here or click to browse'}
-                      </p>
-                      <p className="text-sm text-gray-500 mb-6">
-                        PDF, DOCX supported • Advanced skill extraction • Instant analysis
-                      </p>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept=".pdf,.docx"
-                        onChange={handleFileUpload}
-                        className="hidden"
-                      />
-                      <button className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-8 py-4 rounded-xl font-medium hover:from-blue-700 hover:to-blue-800 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-1">
-                        <Upload className="w-5 h-5 inline mr-2" />
-                        Choose File
-                      </button>
-                    </>
-                  )}
-                </div>
-
-                {extractedText && (
-                  <div className="mt-6 p-6 bg-gradient-to-r from-green-50 to-emerald-50 rounded-2xl border border-green-200">
-                    <div className="flex items-center mb-3">
-                      <CheckCircle className="w-5 h-5 text-green-600 mr-2" />
-                      <span className="font-medium text-green-800">Analysis Complete</span>
+                    <div>
+                      <p className="text-emerald-700 font-semibold text-lg mb-2">Analyzing Resume</p>
+                      <p className="text-gray-600 text-sm">AI is extracting your skills and experience</p>
                     </div>
-                    <p className="text-green-700 text-sm mb-4">{extractedText}</p>
-                    
-                    {extractedSkills.length > 0 && (
-                      <div>
-                        <h4 className="font-medium text-green-800 mb-3">Extracted Skills by Category:</h4>
-                        <div className="space-y-3">
-                          {Object.entries(
-                            extractedSkills.reduce((acc, skill) => {
-                              if (!acc[skill.category]) acc[skill.category] = [];
-                              acc[skill.category].push(skill);
-                              return acc;
-                            }, {} as { [key: string]: Skill[] })
-                          ).map(([category, skills]) => (
-                            <div key={category} className="bg-white/50 rounded-lg p-3">
-                              <div className="flex items-center mb-2">
-                                {getCategoryIcon(category)}
-                                <span className="text-sm font-medium text-gray-700 ml-2 capitalize">
-                                  {category} ({skills.length})
-                                </span>
-                              </div>
-                              <div className="flex flex-wrap gap-1">
-                                {skills.slice(0, 5).map((skill) => (
-                                  <span
-                                    key={skill.name}
-                                    className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-green-100 text-green-800"
-                                  >
-                                    {skill.name}
-                                    <span className="ml-1 text-green-600">
-                                      {Math.round(skill.confidence * 100)}%
-                                    </span>
-                                  </span>
-                                ))}
-                                {skills.length > 5 && (
-                                  <span className="text-xs text-gray-500 px-2 py-1">
-                                    +{skills.length - 5} more
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    <div className="w-full bg-gray-200 rounded-full h-3">
+                      <div className="bg-gradient-to-r from-emerald-500 to-teal-500 h-3 rounded-full animate-pulse" style={{width: '75%'}}></div>
+                    </div>
                   </div>
+                ) : (
+                  <>
+                    <div className="relative mb-6">
+                      <div className="w-20 h-20 bg-gradient-to-br from-gray-100 to-gray-200 rounded-2xl flex items-center justify-center mx-auto mb-4 group-hover/upload:from-emerald-100 group-hover/upload:to-teal-100 transition-all duration-300">
+                        <FileText className="w-10 h-10 text-gray-400 group-hover/upload:text-emerald-600 transition-colors" />
+                      </div>
+                      {uploadedFile && (
+                        <div className="absolute -top-2 -right-2 w-8 h-8 bg-green-500 rounded-full flex items-center justify-center shadow-lg">
+                          <CheckCircle className="w-5 h-5 text-white" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="mb-8">
+                      <p className="text-xl font-semibold text-gray-800 mb-2">
+                        {uploadedFile ? uploadedFile.name : 'Drop your resume here'}
+                      </p>
+                      <p className="text-gray-500">
+                        Supports PDF & DOCX • Instant AI analysis • Secure processing
+                      </p>
+                    </div>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".pdf,.docx"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                    <button className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-8 py-4 rounded-xl font-semibold hover:from-emerald-700 hover:to-teal-700 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5">
+                      <Upload className="w-5 h-5 inline mr-3" />
+                      Choose File
+                    </button>
+                  </>
                 )}
               </div>
+
+              {extractedText && (
+                <div className="mt-8 p-6 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-2xl border border-emerald-200/50">
+                  <div className="flex items-center mb-4">
+                    <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center mr-3">
+                      <CheckCircle className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-emerald-800">Analysis Complete</h4>
+                      <p className="text-sm text-emerald-600">Skills successfully extracted</p>
+                    </div>
+                  </div>
+                  <p className="text-emerald-700 mb-4">{extractedText}</p>
+                  
+                  {extractedSkills.length > 0 && (
+                    <div>
+                      <p className="font-medium text-emerald-800 mb-3">Discovered Skills:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {extractedSkills.slice(0, 10).map((skill) => (
+                          <span
+                            key={skill.name}
+                            className="px-3 py-1.5 bg-white/70 backdrop-blur-sm text-emerald-800 text-sm font-medium rounded-lg border border-emerald-200/50 shadow-sm"
+                          >
+                            {skill.name}
+                          </span>
+                        ))}
+                        {extractedSkills.length > 10 && (
+                          <span className="px-3 py-1.5 bg-emerald-100 text-emerald-700 text-sm font-medium rounded-lg">
+                            +{extractedSkills.length - 10} more
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Enhanced Manual Skills Entry */}
+          {/* Manual Skills Entry */}
           <div className="group">
-            <div className="bg-white/70 backdrop-blur-sm rounded-3xl shadow-xl p-8 hover:shadow-2xl transition-all duration-500 border border-gray-200/50 hover:border-green-300/50 relative overflow-hidden">
-              {/* Gradient overlay */}
-              <div className="absolute inset-0 bg-gradient-to-br from-green-50/50 to-teal-50/50 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-              
-              <div className="relative z-10">
-                <div className="flex items-center justify-between mb-8">
-                  <h3 className="text-2xl font-bold text-gray-900 flex items-center">
-                    <div className="p-3 bg-gradient-to-br from-green-500 to-green-600 rounded-xl mr-4 shadow-lg">
-                      <Search className="w-6 h-6 text-white" />
-                    </div>
-                    Manual Skill Entry
-                  </h3>
-                  <div className="flex items-center space-x-1 text-xs text-green-600 bg-green-50 px-3 py-1 rounded-full">
-                    <Target className="w-3 h-3" />
-                    <span>Precision Mode</span>
-                  </div>
+            <div className="bg-white/70 backdrop-blur-sm rounded-3xl border border-gray-200/50 p-8 shadow-xl hover:shadow-2xl transition-all duration-500 hover:-translate-y-1">
+              <div className="flex items-center mb-8">
+                <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center mr-4 shadow-lg">
+                  <Target className="w-7 h-7 text-white" />
                 </div>
+                <div>
+                  <h3 className="text-2xl font-bold text-gray-900 mb-1">
+                    Manual Entry
+                  </h3>
+                  <p className="text-gray-600">
+                    Build your skill profile step by step
+                  </p>
+                </div>
+              </div>
                 
-                <div className="space-y-6">
+              <div className="space-y-6">
+                <div className="relative">
+                  <label className="block text-sm font-semibold text-gray-700 mb-3">Add Your Skills</label>
                   <div className="relative">
                     <input
                       type="text"
@@ -785,118 +681,113 @@ function App() {
                       onChange={(e) => setSkillInput(e.target.value)}
                       onKeyPress={handleSkillInputKeyPress}
                       placeholder="Type a skill and press Enter..."
-                      className="w-full px-6 py-4 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-green-500/20 focus:border-green-500 transition-all duration-300 text-lg placeholder-gray-400 bg-white/50 backdrop-blur-sm"
+                      className="w-full px-4 py-4 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-300 text-base bg-white/50 backdrop-blur-sm placeholder-gray-400"
                     />
                     <Search className="absolute right-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    
-                    {skillInput && filteredSuggestions.length > 0 && (
-                      <div className="absolute z-20 w-full mt-2 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl shadow-2xl max-h-64 overflow-y-auto">
-                        {filteredSuggestions.map((suggestion) => (
-                          <button
-                            key={suggestion}
-                            onClick={() => addSkill(suggestion)}
-                            className="w-full px-6 py-3 text-left hover:bg-gradient-to-r hover:from-green-50 hover:to-teal-50 transition-all duration-200 flex items-center justify-between group"
+                  </div>
+                  
+                  {skillInput && filteredSuggestions.length > 0 && (
+                    <div className="absolute z-20 w-full mt-2 bg-white/95 backdrop-blur-sm border border-gray-200/50 rounded-xl shadow-2xl max-h-64 overflow-y-auto">
+                      {filteredSuggestions.map((suggestion) => (
+                        <button
+                          key={suggestion}
+                          onClick={() => addSkill(suggestion)}
+                          className="w-full px-4 py-3 text-left hover:bg-blue-50 transition-all duration-200 flex items-center justify-between group border-b border-gray-100/50 last:border-0"
+                        >
+                          <span className="font-medium text-gray-700 group-hover:text-blue-700">
+                            {suggestion}
+                          </span>
+                          <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-3">Job Preference (Optional)</label>
+                  <input
+                    type="text"
+                    value={jobPreference}
+                    onChange={(e) => setJobPreference(e.target.value)}
+                    placeholder="e.g., Software Engineer, Data Scientist..."
+                    className="w-full px-4 py-4 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-300 text-base bg-white/50 backdrop-blur-sm placeholder-gray-400"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-lg font-semibold text-gray-900">Your Skill Portfolio</h4>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-sm text-gray-500">{userSkills.length} skills</span>
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                    </div>
+                  </div>
+                  <div className="min-h-[140px] p-6 border-2 border-dashed border-gray-300 rounded-2xl bg-gradient-to-br from-gray-50/50 to-white/50 backdrop-blur-sm">
+                    {userSkills.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                        <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-3">
+                          <Target className="w-6 h-6 text-gray-400" />
+                        </div>
+                        <p className="text-sm font-medium">No skills added yet</p>
+                        <p className="text-xs text-gray-400 mt-1">Start typing above to add skills</p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-3">
+                        {userSkills.map((skill, index) => (
+                          <span
+                            key={skill}
+                            className="group inline-flex items-center px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-full font-medium hover:from-blue-600 hover:to-indigo-700 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                            style={{ animationDelay: `${index * 100}ms` }}
                           >
-                            <span className="font-medium text-gray-700 group-hover:text-green-700">
-                              {suggestion}
-                            </span>
-                            <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                            </div>
-                          </button>
+                            {skill}
+                            <button
+                              onClick={() => removeSkill(skill)}
+                              className="ml-2 hover:text-red-200 transition-colors"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </span>
                         ))}
                       </div>
                     )}
                   </div>
-
-                  <div>
-                    <input
-                      type="text"
-                      value={jobPreference}
-                      onChange={(e) => setJobPreference(e.target.value)}
-                      placeholder="Preferred job role (optional)"
-                      className="w-full px-6 py-4 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-green-500/20 focus:border-green-500 transition-all duration-300 text-lg placeholder-gray-400 bg-white/50 backdrop-blur-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-lg font-semibold text-gray-900">Your Skills Portfolio</h4>
-                      <div className="flex items-center space-x-2 text-sm text-gray-500">
-                        <span>{userSkills.length} skills</span>
-                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                      </div>
-                    </div>
-                    <div className="min-h-[120px] p-6 border-2 border-dashed border-gray-300 rounded-xl bg-gradient-to-br from-gray-50/50 to-white/50 backdrop-blur-sm">
-                      {userSkills.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full text-gray-500">
-                          <Target className="w-8 h-8 mb-2 opacity-50" />
-                          <p className="text-sm">Add skills above to build your portfolio</p>
-                        </div>
-                      ) : (
-                        <div className="flex flex-wrap gap-3">
-                          {userSkills.map((skill, index) => (
-                            <span
-                              key={skill}
-                              className="group inline-flex items-center px-4 py-2 rounded-full text-sm font-medium bg-gradient-to-r from-green-500 to-teal-500 text-white hover:from-green-600 hover:to-teal-600 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-1 animate-fade-in"
-                              style={{ animationDelay: `${index * 100}ms` }}
-                            >
-                              {skill}
-                              <button
-                                onClick={() => removeSkill(skill)}
-                                className="ml-2 hover:text-red-200 transition-colors"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={findJobMatches}
-                    disabled={userSkills.length === 0 || isLoading}
-                    className="w-full bg-gradient-to-r from-green-600 to-teal-600 text-white py-4 px-8 rounded-xl font-bold text-lg hover:from-green-700 hover:to-teal-700 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center shadow-lg hover:shadow-xl transform hover:-translate-y-1 disabled:transform-none"
-                  >
-                    {isLoading ? (
-                      <>
-                        <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin mr-3" />
-                        Analyzing Matches...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-6 h-6 mr-3" />
-                        Find Perfect Matches
-                      </>
-                    )}
-                  </button>
                 </div>
+
+                <button
+                  onClick={findJobMatches}
+                  disabled={userSkills.length === 0 || isLoading}
+                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 px-8 rounded-xl font-bold text-lg hover:from-blue-700 hover:to-indigo-700 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:transform-none"
+                >
+                  {isLoading ? (
+                    <>
+                      <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin mr-3" />
+                      Finding Perfect Matches...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-6 h-6 mr-3" />
+                      Discover Opportunities
+                    </>
+                  )}
+                </button>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Enhanced Results Section */}
+        {/* Results Section */}
         {showResults && (
-          <div className="animate-fade-in">
-            <div className="bg-white/70 backdrop-blur-sm rounded-3xl shadow-2xl p-10 mb-12 border border-gray-200/50">
-              <div className="flex items-center justify-between mb-8">
-                <h3 className="text-3xl font-bold text-gray-900 flex items-center">
-                  <div className="p-3 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl mr-4 shadow-lg">
-                    <TrendingUp className="w-8 h-8 text-white" />
-                  </div>
-                  Job Recommendations
+          <div>
+            <div className="bg-white rounded-lg border border-gray-200 p-6 mb-8">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Job Matches
                 </h3>
-                <div className="flex items-center space-x-4">
-                  <div className="text-sm text-gray-500">
-                    Found {jobMatches.length} matches
-                  </div>
-                  <div className="flex items-center space-x-1 text-sm text-purple-600 bg-purple-50 px-4 py-2 rounded-full">
-                    <Award className="w-4 h-4" />
-                    <span>AI Ranked</span>
-                  </div>
+                <div className="text-sm text-gray-500">
+                  {jobMatches.length} {jobMatches.length === 1 ? 'match' : 'matches'} found
                 </div>
               </div>
               
@@ -1219,36 +1110,7 @@ function App() {
         )}
       </div>
 
-      <style jsx>{`
-        @keyframes fade-in {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        
-        .animate-fade-in {
-          animation: fade-in 0.6s ease-out forwards;
-        }
-        
-        .line-clamp-2 {
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-        
-        .line-clamp-3 {
-          display: -webkit-box;
-          -webkit-line-clamp: 3;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-      `}</style>
+
     </div>
   );
 }

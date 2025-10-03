@@ -1,4 +1,6 @@
 from flask import Flask, render_template, request, jsonify, session
+from flask_cors import CORS
+from werkzeug.utils import secure_filename
 import os
 import sqlite3
 import json
@@ -9,15 +11,22 @@ from course_recommender import CourseRecommender
 from database import DatabaseManager
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
 app.secret_key = 'your-secret-key-here'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Initialize components
+print("Initializing components...")
 job_matcher = JobMatcher()
+print("JobMatcher initialized")
 resume_processor = ResumeProcessor()
+print("ResumeProcessor initialized")
 course_recommender = CourseRecommender()
+print("CourseRecommender initialized")
 db_manager = DatabaseManager()
+print("DatabaseManager initialized")
+print("All components ready!")
 
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -29,6 +38,8 @@ def index():
 @app.route('/upload_resume', methods=['POST'])
 def upload_resume():
     try:
+        print("Upload request received")
+        
         if 'resume' not in request.files:
             return jsonify({'error': 'No file uploaded'}), 400
         
@@ -40,13 +51,18 @@ def upload_resume():
             # Save file
             filename = secure_filename(file.filename)
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            print(f"Saving file to: {filepath}")
             file.save(filepath)
             
             # Extract text from resume
+            print("Extracting text...")
             resume_text = resume_processor.extract_text(filepath)
+            print(f"Extracted text length: {len(resume_text)}")
             
             # Extract skills from resume
+            print("Extracting skills...")
             extracted_skills = resume_processor.extract_skills(resume_text)
+            print(f"Extracted skills: {extracted_skills}")
             
             # Store in session
             session['resume_text'] = resume_text
@@ -64,6 +80,9 @@ def upload_resume():
         return jsonify({'error': 'Invalid file format'}), 400
     
     except Exception as e:
+        print(f"Error in upload_resume: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/match_jobs', methods=['POST'])
@@ -136,10 +155,11 @@ def get_suggestions():
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ['pdf', 'docx']
 
-def secure_filename(filename):
-    import re
-    filename = re.sub(r'[^\w\s-]', '', filename).strip()
-    return re.sub(r'[-\s]+', '-', filename)
+
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    print("Starting Flask server...")
+    try:
+        app.run(debug=True, host='127.0.0.1', port=5001)
+    except Exception as e:
+        print(f"Error starting server: {e}")

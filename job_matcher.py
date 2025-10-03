@@ -8,8 +8,8 @@ from typing import List, Dict, Tuple
 class JobMatcher:
     def __init__(self):
         self.model = SentenceTransformer('all-mpnet-base-v2')
-        self.threshold = 0.65
-        self.min_score = 34.62
+        self.threshold = 0.1
+        self.min_score = 10.0
         self.onet_data = self.load_onet_data()
         self.job_embeddings = self.precompute_job_embeddings()
         

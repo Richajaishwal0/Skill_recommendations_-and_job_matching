@@ -1,31 +1,32 @@
 import PyPDF2
 import docx
 import re
-import spacy
 from typing import List, Set
 import os
 
 class ResumeProcessor:
     def __init__(self):
-        # Load spaCy model for NLP processing
+        # spaCy is optional - use basic processing if not available
+        self.nlp = None
         try:
+            import spacy
             self.nlp = spacy.load("en_core_web_sm")
-        except OSError:
-            # Fallback to basic processing if spaCy model not available
-            self.nlp = None
+        except (ImportError, OSError):
+            # Fallback to basic processing if spaCy not available
+            pass
         
-        # Predefined skill keywords for extraction
+        # Comprehensive skill keywords for extraction
         self.skill_keywords = {
-            'programming': ['python', 'java', 'javascript', 'c++', 'c#', 'php', 'ruby', 'go', 'rust', 'swift', 'kotlin'],
-            'web': ['html', 'css', 'react', 'angular', 'vue', 'nodejs', 'express', 'django', 'flask', 'bootstrap'],
-            'data': ['sql', 'mysql', 'postgresql', 'mongodb', 'redis', 'elasticsearch', 'hadoop', 'spark', 'kafka'],
-            'ml': ['machine learning', 'deep learning', 'tensorflow', 'pytorch', 'scikit-learn', 'pandas', 'numpy'],
-            'cloud': ['aws', 'azure', 'gcp', 'docker', 'kubernetes', 'terraform', 'jenkins', 'gitlab'],
-            'mobile': ['android', 'ios', 'flutter', 'react native', 'xamarin', 'ionic'],
-            'tools': ['git', 'jira', 'confluence', 'slack', 'trello', 'figma', 'photoshop', 'illustrator'],
-            'methodologies': ['agile', 'scrum', 'kanban', 'devops', 'ci/cd', 'tdd', 'bdd'],
-            'soft_skills': ['leadership', 'communication', 'teamwork', 'problem solving', 'analytical thinking'],
-            'business': ['project management', 'business analysis', 'requirements gathering', 'stakeholder management']
+            'programming': ['python', 'java', 'javascript', 'typescript', 'c++', 'c#', 'php', 'ruby', 'go', 'rust', 'swift', 'kotlin', 'scala', 'r', 'matlab', 'perl', 'c', 'vb.net', 'dart', 'elixir', 'haskell', 'clojure'],
+            'web': ['html', 'css', 'react', 'angular', 'vue.js', 'vue', 'nodejs', 'node.js', 'express', 'django', 'flask', 'bootstrap', 'tailwind', 'sass', 'less', 'jquery', 'webpack', 'vite', 'next.js', 'nuxt.js', 'gatsby', 'svelte'],
+            'data': ['sql', 'mysql', 'postgresql', 'mongodb', 'redis', 'elasticsearch', 'hadoop', 'spark', 'kafka', 'oracle', 'sqlite', 'mariadb', 'neo4j', 'cassandra', 'dynamodb', 'firebase', 'supabase'],
+            'ml': ['machine learning', 'deep learning', 'tensorflow', 'pytorch', 'scikit-learn', 'pandas', 'numpy', 'matplotlib', 'seaborn', 'plotly', 'jupyter', 'keras', 'opencv', 'nltk', 'spacy', 'transformers'],
+            'cloud': ['aws', 'azure', 'gcp', 'google cloud', 'docker', 'kubernetes', 'terraform', 'jenkins', 'gitlab', 'github actions', 'circleci', 'heroku', 'vercel', 'netlify', 'digitalocean'],
+            'mobile': ['android', 'ios', 'flutter', 'react native', 'xamarin', 'ionic', 'cordova', 'unity', 'kotlin', 'swift', 'objective-c'],
+            'tools': ['git', 'github', 'gitlab', 'bitbucket', 'jira', 'confluence', 'slack', 'trello', 'asana', 'figma', 'adobe xd', 'sketch', 'photoshop', 'illustrator', 'postman', 'insomnia'],
+            'methodologies': ['agile', 'scrum', 'kanban', 'devops', 'ci/cd', 'tdd', 'bdd', 'waterfall', 'lean', 'six sigma', 'itil'],
+            'soft_skills': ['leadership', 'communication', 'teamwork', 'problem solving', 'analytical thinking', 'critical thinking', 'creativity', 'time management', 'project management'],
+            'business': ['project management', 'business analysis', 'requirements gathering', 'stakeholder management', 'risk management', 'quality assurance', 'process improvement', 'change management']
         }
         
         # Flatten all skills for easier searching
@@ -70,88 +71,39 @@ class ResumeProcessor:
         return text
     
     def extract_skills(self, text: str) -> List[str]:
-        """Extract skills only from explicit skill sections, very strictly."""
+        """Extract skills from resume text using exact matching."""
         skills = set()
         text_lower = text.lower()
-        lines = [line.strip() for line in text_lower.split('\n')]
-
-        # Define section headers that indicate the start of a skill section
-        skill_section_headers = [
-            'technical skills', 'skills', 'programming languages', 'frameworks', 'libraries', 'tools', 'technologies', 'databases', 'certifications'
-        ]
-        # Define headers that indicate a new section (to stop parsing skills)
-        all_section_headers = [
-            'education', 'projects', 'experience', 'certifications', 'summary', 'objective', 'profile', 'interests', 'hobbies', 'awards', 'publications', 'contact', 'personal information', 'languages', 'references', 'achievements', 'activities', 'extra-curricular', 'internship', 'work experience', 'professional experience', 'academic background', 'academic qualifications', 'academic achievements', 'academic projects', 'research', 'conference', 'paper', 'volunteer', 'leadership', 'positions of responsibility', 'positions', 'responsibilities', 'extracurricular', 'extracurricular activities', 'other'
-        ] + skill_section_headers
-
-        in_skill_section = False
-        for i, line in enumerate(lines):
-            line_clean = line.strip(':').strip()
-            # Check if this line is a skill section header
-            if any(header in line_clean for header in skill_section_headers):
-                in_skill_section = True
-                continue
-            # If we hit another section header or a blank line, stop parsing skills
-            if in_skill_section and (not line_clean or any(header in line_clean for header in all_section_headers)):
-                break
-            # If in skill section, parse skills from this line
-            if in_skill_section and line_clean:
-                # Split by common delimiters
-                items = re.split(r'[•,;\|\t\-]', line_clean)
-                for item in items:
-                    skill_candidate = item.strip().lower()
-                    # Only match if the skill is in the known skills list
-                    if skill_candidate in self.all_skills:
-                        skills.add(skill_candidate.title())
-        return sorted(list(skills))
-    
-    def extract_skills_nlp(self, text: str) -> Set[str]:
-        """Extract skills using spaCy NLP."""
-        skills = set()
         
-        try:
-            doc = self.nlp(text)
-            
-            # Extract noun phrases that might be skills
-            for chunk in doc.noun_chunks:
-                chunk_text = chunk.text.lower().strip()
-                if self.is_likely_skill(chunk_text):
-                    skills.add(chunk_text.title())
-            
-            # Extract named entities
-            for ent in doc.ents:
-                if ent.label_ in ['ORG', 'PRODUCT', 'LANGUAGE'] and self.is_likely_skill(ent.text.lower()):
-                    skills.add(ent.text.title())
+        # Create word boundaries for each skill to avoid partial matches
+        for skill in self.all_skills:
+            skill_lower = skill.lower()
+            # Use word boundaries to match exact skills
+            pattern = r'\b' + re.escape(skill_lower) + r'\b'
+            if re.search(pattern, text_lower):
+                skills.add(skill.title())
         
-        except Exception:
-            pass  # Fall back to other methods if NLP fails
-        
-        return skills
-    
-    def extract_skills_regex(self, text: str) -> Set[str]:
-        """Extract skills using regex patterns."""
-        skills = set()
-        
-        # Common skill patterns
-        patterns = [
-            r'\b(?:experienced in|skilled in|proficient in|knowledge of|familiar with)\s+([^.]+)',
-            r'\b(?:Programming languages?|Technologies?|Tools?|Frameworks?)[:\s]+([^.]+)',
-            r'\b([\w\s]+)\s+(?:years?|experience|expertise)',
+        # Also extract from common skill listing patterns
+        skill_patterns = [
+            r'(?:skills?|technologies?|tools?|languages?)[:\s]*([^\n.]+)',
+            r'(?:experienced in|skilled in|proficient in|knowledge of)[:\s]*([^\n.]+)',
             r'•\s*([^•\n]+)',  # Bullet points
             r'-\s*([^-\n]+)',  # Dash points
         ]
         
-        for pattern in patterns:
+        for pattern in skill_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                # Split by common delimiters
+                # Split by common delimiters and check each item
                 items = re.split(r'[,;|&]', match)
                 for item in items:
-                    item = item.strip()
-                    if self.is_likely_skill(item.lower()):
-                        skills.add(item.title())
+                    item_clean = item.strip().lower()
+                    if item_clean in self.all_skills:
+                        skills.add(item_clean.title())
         
-        return skills
+        return sorted(list(skills))
+    
+
     
     def is_likely_skill(self, text: str) -> bool:
         """Determine if text is likely a skill (stricter: only in known skills)."""
